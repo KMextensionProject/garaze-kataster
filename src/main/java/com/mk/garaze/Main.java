@@ -1,47 +1,46 @@
 package com.mk.garaze;
 
+import static java.util.Comparator.comparing;
+import static java.util.stream.Collectors.toList;
+
 import java.io.File;
-import java.io.IOException;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
+import com.mk.garaze.utils.DocxUtil;
+import com.mk.garaze.utils.XlsxUtil;
 
 public class Main {
 
-	public static void main(String[] args) {
-		String url_1 = "https://kataster.skgeodesy.sk/Portal/api/Bo/GeneratePrfPublic?prfNumber=3677&cadastralUnitCode=870293&outputType=html"; // toryska pg3
-		String url_2 = "https://kataster.skgeodesy.sk/Portal/api/Bo/GeneratePrfPublic?prfNumber=3275&cadastralUnitCode=870293&outputType=html";
-		String url_3 = "https://kataster.skgeodesy.sk/Portal/api/Bo/GeneratePrfPublic?prfNumber=6572&cadastralUnitCode=870293&outputType=html";
-		try {
-			Document doc = Jsoup.parse(new File("/home/martom/Desktop/list_vlastnictva.html"));
-			Elements elements = doc.getAllElements();
+	// skuist toto: https://kevcodez.de/posts/2015-07-18-jsoup-tutorial/
+	public static void main(String[] args) throws Exception {
+		List<Map<String, String>> titleDeeds = new ArrayList<>(500);
 
-			// jebat bude to normalna mapa, ktoru budem potom vediet tresknut do excelu..
-//			TitleDeed td = new TitleDeed();
-//			td.setTitle(elements.select("title").text());
-			Map<String, Object> data = new LinkedHashMap<>();
-			data.put("title", elements.select("title").text());
-
-			// prva tabulka ma v sebe katastralne uzemie, resp. obec
-			Elements tables = elements.select("tbody");
-//			System.out.println("tables: " + tables.size());
-			Elements rows = tables.first().select("tr").get(1).select("td");
-//			System.out.println("rows: " + rows.size());
-//			System.out.println(rows.get(3).text());
-
-			data.put("municipality", rows.get(3).text()); // obec
-
-			System.out.println(data);
-			
-//			for (Element table : tables) {
-//				
-//			}
-		} catch (IOException ioex) {
-			ioex.printStackTrace();
+		File[] lvs = new File("/home/UX/mkrajcovicux/Documents/lv_nebytove_priestory").listFiles();
+		for (File html : lvs) {
+			System.out.println("processing: " + html.getName());
+			titleDeeds.addAll(TDParser.parseTitleDeed(html));
 		}
+		Comparator<Map<String, String>> byMunicipality = comparing(m -> m.get("obec"));
+		Comparator<Map<String, String>> byStreet = comparing(m -> m.get("vchod"));
+
+		// wrap it for transformer
+		Map<String, Object> data = new HashMap<>(1);
+		data.put("table", titleDeeds.stream()
+				.filter(Main::onlyGarages)
+				.distinct()
+				.sorted(byMunicipality.thenComparing(byStreet))
+				.collect(toList())
+		);
+		XlsxUtil.generateXlsx("templates/xlsx/garages_report.xlsx", data, "output_report.xlsx");
+		// this is meant to be created for all the lines that have been marked as chosen in excel
+		DocxUtil.generateDocx("templates/docx/garages_letter.docx", titleDeeds.get(0), "output_letter.docx");
+	}
+
+	private static boolean onlyGarages(Map<String, String> map) {
+		return "Garáž".equals(map.get("druh_nebytoveho_priestoru"));
 	}
 }
