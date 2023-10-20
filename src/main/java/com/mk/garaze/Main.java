@@ -26,13 +26,15 @@ public class Main {
 		}
 		Comparator<Map<String, String>> byMunicipality = comparing(m -> m.get("obec"));
 		Comparator<Map<String, String>> byStreet = comparing(m -> m.get("vchod"));
+		Comparator<Map<String, String>> byPropertyNumber = comparing(m -> m.get("cislo_priestoru"));
 
 		// wrap it for transformer
 		Map<String, Object> data = new HashMap<>(1);
 		data.put("table", titleDeeds.stream()
 				.filter(Main::onlyGarages)
 				.distinct()
-				.sorted(byMunicipality.thenComparing(byStreet))
+				.sorted(byMunicipality.thenComparing(byStreet)
+									  .thenComparing(byPropertyNumber))
 				.collect(toList())
 		);
 		XlsxUtil.generateXlsx("templates/xlsx/garages_report.xlsx", data, "output_report.xlsx");
