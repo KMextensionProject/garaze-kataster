@@ -69,7 +69,7 @@ public class TDParser {
 			// section 1 --> tieto sekcie mozu byt niekedy dve az tri po sebe
 			tableRows = tableIterator.next().getElementsByTag("tr");
 			rowValues = tableRows.get(1).getElementsByTag("td").eachText();
-			titleDeedItem.putAll(NameParser.parseName(rowValues.get(1)));
+			titleDeedItem.putAll(OwnerParser.parseOwner(rowValues.get(1)));
 			titleDeedItem.put("spoluvlastnicky_podiel", rowValues.get(2));
 			// section 2
 			rowValues = tableRows.get(3).getElementsByTag("td").eachText();

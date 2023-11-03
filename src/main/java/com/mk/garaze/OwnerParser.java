@@ -18,12 +18,8 @@ public class OwnerParser {
 
 	public static void main(String[] args) throws IOException {
 		try (Stream<String> names = Files.lines(Paths.get("src/main/resources/to_parse"))) {
-			names//.peek(System.out::println)
-				 .filter(OwnerParser::isCorporate)
-//				 .map(OwnerParser::parseCorporateName)
-				 .map(OwnerParser::parseCorporateOwner)
-//				 .filter(e -> Objects.isNull(e.get("owner_country_acronym")))
-				 //.forEach(System.out::println);
+			names.filter(e -> !isCorporate(e))
+//				 .map(OwnerParser::parsePhysicalPersonOwner)
 				 .forEach(System.out::println);
 		}
 	}
@@ -47,7 +43,7 @@ public class OwnerParser {
 	 */
 	private static Map<String, String> parseCorporateOwner(String corporateLine) {
 		List<String> corporateParts = stream(corporateLine.split(",")).map(String::trim).collect(toList());
-		Map<String, String> corporateData = new HashMap<>();
+		Map<String, String> corporateData = new HashMap<>(6);
 		/*
 		 * The order must be maintained because all parse methods are mutating the list
 		 * enriching it with empty values or shrinking it when some elements are
@@ -66,15 +62,18 @@ public class OwnerParser {
 	}
 
 	private static String parseCorporateName(List<String> corporateParts) {
-		// TODO:
-		// {owner_street=družstvo pre výstavbu a správu garáží, owner_name=Bratislavské garážové družstvo, owner_corporate_id=2704}
+//		Detský fond Slovenskej republiky, občianske združenie, street 1, city, PSČ 000 00, SR, IČO: 00000
+//		{owner_street=družstvo pre výstavbu a správu garáží, owner_name=Bratislavské garážové družstvo, owner_corporate_id=2704}
 		String firstNamePart = corporateParts.get(0);
 		String potentialSecondNamePart = corporateParts.get(1);
 
+		// TODO: do something with this
 		String toEval = potentialSecondNamePart.replace(" ", "");
-		if (toEval.contains("spol.") 
+		if (toEval.contains("spol.") // can omit spol.?
 			|| toEval.contains("s.r.o") 
-			|| toEval.contains("a.s")) {
+			|| toEval.contains("a.s")
+			|| toEval.contains("združenie")
+			|| toEval.contains("družstvo")) {
 			corporateParts.remove(1); // let others forget this splitted name with additional comma
 			firstNamePart += " " + potentialSecondNamePart;
 		}
@@ -106,8 +105,6 @@ public class OwnerParser {
 	}
 
 	private static String parseCorporatePostalCode(List<String> corporateParts) {
-		// TODO:
-		// Detský fond Slovenskej republiky, občianske združenie, street 1, city, PSČ 000 00, SR, IČO: 00000
 		String postalCode = corporateParts.get(3);
 		if (!postalCode.contains("PSČ")) {
 			corporateParts.add(3, null);
@@ -137,50 +134,19 @@ public class OwnerParser {
 	 *
 	 * @param personLine
 	 * @return
+	 * TODO: TOTAL REFACTOR
 	 */
 	private static Map<String, String> parsePhysicalPersonOwner(String personLine) {
-		try {
-			String[] nameParts = personLine.split(", ");
-		String fullName = nameParts[0].split(" r\\. ")[0].trim();
-		int varIndex = 1; 
-		String street = nameParts[varIndex];
-		while (isTitle(street)) {
-			street = nameParts[++varIndex];
-		}
-		++varIndex;
-		String city = nameParts[varIndex]; // ., sposobi, ze sa tu ocitne niekedy Ing. -> tak ak to konci bodkou, tak je to cast mena a musim ist dalej // neni lepsie pouzit potom iterator?
-//		if (city.endsWith(".")) {
-//			city = nameParts[++varIndex];
-//		}
-		++varIndex;
-		String psc = nameParts[varIndex].replace("PSČ ", "");
-		++varIndex;
-		// tento akronym tam je len v pripade, ze ide o SR.. ten vyjebany rakusan, tam nema nic a ma tam rovno birth date
-		String countryAcronym = nameParts[varIndex];
-		String birthDate = null;
-		if (countryAcronym.contains("narodenia")) {
-//			System.out.println(countryAcronym);
-			birthDate = countryAcronym.split(": ")[1]; // toto zafunguje pri svajciarsku...inak nie
-			countryAcronym = null;
-		} else {
-			++varIndex;
-			birthDate = nameParts[varIndex];
-			if (birthDate.contains("narodenia")) {
-//				System.out.println(birthDate);
-				birthDate = birthDate.split(": ")[1]; // toto funguje len tam kde to uz je...ak tam nie je datum narodenia este, tak treba pozriet hlbsie
-			}
-		}
+		List<String> personParts = stream(personLine.split(",")).map(String::trim).collect(toList());
+
 		Map<String, String> data = new LinkedHashMap<>(6);
-		data.put("owner_name", fullName);
-		data.put("owner_street", street);
-		data.put("owner_city", city);// ., sa ulozi do city aj ked to ma byt cast mena.. toto Ing., mozem zahodit
-		data.put("owner_psc", psc);
-		data.put("owner_country_code", countryAcronym);
-		data.put("owner_birthDate", birthDate);
+//		data.put("owner_name", fullName);
+//		data.put("owner_street", street);
+//		data.put("owner_city", city);// ., sa ulozi do city aj ked to ma byt cast mena.. toto Ing., mozem zahodit
+//		data.put("owner_postal_code", psc);
+//		data.put("owner_country_code", countryAcronym);
+//		data.put("owner_birthDate", birthDate);
 		return data;
-		} catch(Exception ex) {
-			return Collections.emptyMap();
-		}
 	}
 
 	private static final List<String> TITLES = Arrays.asList("MUDr.", "Ing.", "Mgr.", "PhDr.", "JUDr.", "Bc.", "s.r.o.", "Dr.");
