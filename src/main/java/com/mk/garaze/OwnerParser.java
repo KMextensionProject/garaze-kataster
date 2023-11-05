@@ -6,12 +6,16 @@ import static java.util.stream.Collectors.toList;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class OwnerParser {
@@ -19,11 +23,17 @@ public class OwnerParser {
 	public static void main(String[] args) throws IOException {
 		try (Stream<String> names = Files.lines(Paths.get("src/main/resources/to_parse"))) {
 			names.filter(e -> !isCorporate(e))
-//				 .map(OwnerParser::parsePhysicalPersonOwner)
+//				.peek(System.out::println)
+				 .map(OwnerParser::parsePhysicalPersonOwner)
+//				 .filter(e -> e.get("owner_birthDate") == null)
 				 .forEach(System.out::println);
 		}
 	}
 
+	/**
+	 * @param ownerLine
+	 * @return
+	 */
 	public static Map<String, String> parseOwner(String ownerLine) {
 		if (isCorporate(ownerLine)) {
 			return parseCorporateOwner(ownerLine);
@@ -133,26 +143,183 @@ public class OwnerParser {
 	/**
 	 *
 	 * @param personLine
-	 * @return
-	 * TODO: TOTAL REFACTOR
+	 * @return without TITLE before and after name
 	 */
 	private static Map<String, String> parsePhysicalPersonOwner(String personLine) {
-		List<String> personParts = stream(personLine.split(",")).map(String::trim).collect(toList());
-
+		int openingBrace = personLine.indexOf('(');
+		int closingBrace = personLine.lastIndexOf(')') + 1;
+		String withoutInfo = personLine;
+		if (openingBrace != -1 && closingBrace != 0) {
+			withoutInfo = new StringBuilder(personLine).delete(openingBrace, closingBrace).toString();
+		}
+		List<String> personParts = stream(withoutInfo.split(",")).map(String::trim).collect(toList());
 		Map<String, String> data = new LinkedHashMap<>(6);
-//		data.put("owner_name", fullName);
-//		data.put("owner_street", street);
-//		data.put("owner_city", city);// ., sa ulozi do city aj ked to ma byt cast mena.. toto Ing., mozem zahodit
-//		data.put("owner_postal_code", psc);
-//		data.put("owner_country_code", countryAcronym);
-//		data.put("owner_birthDate", birthDate);
+		data.put("owner_name", parsePhysicalPersonName(personParts));
+		data.put("owner_street", parsePhysicalPersonStreet(personParts));
+		data.put("owner_city", parsePhysicalPersonCity(personParts));
+		data.put("owner_postal_code", parsePhysicalPersonPostalCode(personParts));
+		data.put("owner_country_code", parsePhysicalPersonCountryCode(personParts));
+		data.put("owner_birthDate", parsePhysicalPersonBirthDate(personParts));
 		return data;
 	}
 
-	private static final List<String> TITLES = Arrays.asList("MUDr.", "Ing.", "Mgr.", "PhDr.", "JUDr.", "Bc.", "s.r.o.", "Dr.");
+	private static final Pattern HAS_DIGITS = Pattern.compile("[0-9]");
 
-	private static boolean isTitle(String line) {
-		return TITLES.stream().anyMatch(e -> line.contains(e));
+	private static String parsePhysicalPersonName(List<String> personParts) {
+		String fullName = personParts.get(0);
+
+		// if there are two owners, pick the first one
+		String delimeter = fullName.contains(".a ") ? ".a " : " a ";
+		String[] aSplit = fullName.split(delimeter);
+		if (aSplit.length > 1) {
+			fullName = aSplit[0];
+			// ak ta druha polka ma adresu, treba ju tam posunut
+			if (HAS_DIGITS.matcher(aSplit[1]).find()) {
+				String[] spaceSplit = aSplit[1].split(" ");
+				int partsLength = spaceSplit.length;
+				// parse and add street on the position where it belongs
+				String street = spaceSplit[partsLength - 2]
+							  + " "
+							  + spaceSplit[partsLength - 1];
+				personParts.add(1, street);	
+			}
+		}
+
+		fullName = removeAllTitles(fullName);
+
+		// we are interested only in the current name
+		String[] rSplit = fullName.split("r\\.");
+		if (rSplit.length > 1) {
+			fullName = rSplit[0].trim();
+		}
+
+		// if also another part contains this birth name
+		if (personParts.get(1).contains("r.")) {
+			personParts.remove(1);
+		}
+
+		// following parts may be titles alone..
+		TITLES.add("ing"); // can also occur without a dot.. cannot delete it from the name
+		while (containsTitle(personParts.get(1))) {
+			personParts.remove(1);
+		}
+		TITLES.remove("ing");
+
+		// refactor with respect to the above usage
+		if (HAS_DIGITS.matcher(fullName).find()) {
+			String[] spaceSplit = fullName.split(" ");
+			int partsLength = spaceSplit.length;
+			// parse and add street on the position where it belongs
+			String street = spaceSplit[partsLength - 2]
+					      + " "
+						  + spaceSplit[partsLength - 1];
+			personParts.add(1, street);
+			StringBuilder name = new StringBuilder();
+			for (int i = 0; i < partsLength - 2; i++) {
+				name.append(spaceSplit[i])
+				    .append(" ");
+			}
+			fullName = name.toString().trim();
+		}
+
+		return fullName;
 	}
 
+	private static final List<String> TITLES = new ArrayList<>(Arrays.asList("mudr.", "ing.", "mgr", "phd", "judr.", "bc.", "dr.", "csc"));
+
+	private static boolean containsTitle(String line) {
+		return TITLES.stream().anyMatch(e -> line.toLowerCase().contains(e));
+	}
+
+	private static String removeAllTitles(String fullName) {
+		StringBuilder name = new StringBuilder(fullName);
+		int rmStartIndex;
+		for (String title : TITLES) { // tu ak title je ze Ing, nedavat case insensitive + dat prec len vtedy, ak nim konci
+			if ((rmStartIndex = name.toString().toLowerCase().indexOf(title)) != -1) {
+				name.delete(rmStartIndex, (rmStartIndex + title.length()));
+			}
+		}
+		return name.toString().trim();
+	}
+
+	private static String parsePhysicalPersonStreet(List<String> personParts) {
+		String street = personParts.get(1);
+
+		// ak uz hore je realne street, tak ju tam treba dat
+		// toto dole, zoberie opat ten prvy element a pozre, ci je tam
+		// cislo, ak ano, tak street ostane taka ako ma byt
+		Iterator<String> parts = personParts.iterator();
+		parts.next(); //0
+		while (parts.hasNext()) {
+			String part = parts.next();
+			if (HAS_DIGITS.matcher(part).find()) {
+				street = part;
+				break;
+			}
+			parts.remove();
+		}
+
+		if (street.contains("narodenia")) {
+			personParts.add(1, null); // street
+			personParts.add(2, null); // city
+			personParts.add(3, null); // psc
+			personParts.add(4, null); // country
+			personParts.add(5, street);
+			street = null;
+		}
+		if (street != null) {
+			return street.split(" a ")[0];
+		}
+		return street;
+	}
+
+	private static String parsePhysicalPersonCity(List<String> personParts) {
+		String city = personParts.get(2);
+		if (city != null) {
+			city = city.split(" a ")[0];
+			if (city.contains("narodenia")) {
+				personParts.add(2, null);
+				city = null;
+			}
+		}
+		return city;
+	}
+
+	private static final Pattern POSTAL_CODE_PATTERN = Pattern.compile("^\\d{5}$|^\\d{3}\\s\\d{2}$");
+
+	private static String parsePhysicalPersonPostalCode(List<String> personParts) {
+		String postalCode = personParts.get(3);
+		if (postalCode != null) {
+			postalCode = postalCode.replace("PSČ", "").trim();
+			if (!POSTAL_CODE_PATTERN.matcher(postalCode).find()) {
+				// do something else with it?
+				personParts.add(3, postalCode);
+				postalCode = null;
+			}
+		}
+		return postalCode;
+	}
+
+	// nemecka spolkova republika, datum narodenia
+	private static String parsePhysicalPersonCountryCode(List<String> personParts) {
+		String countryCode = personParts.get(4);
+		if (countryCode != null) {
+			if (countryCode.length() < 4) {
+				return countryCode;
+			} else if (countryCode.contains("narodenia")) {
+				personParts.add(5, countryCode);
+				countryCode = null;
+			}
+//			personParts.add(4, null);
+		}
+		return countryCode;
+	}
+
+	private static String parsePhysicalPersonBirthDate(List<String> personParts) {
+		Optional<String> birthDate = personParts.stream().filter(Objects::nonNull).filter(e -> e.contains("narodenia")).findFirst();
+		if (birthDate.isPresent()) {
+			return birthDate.get().split(" ")[2];
+		}
+		return null;
+	}
 }
